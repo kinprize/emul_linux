@@ -1,0 +1,66 @@
+#!/bin/sh
+
+# Должен присутствовать драйвер HASP aksusbd-8.21-1.x86_64.rpm, скачанный с офсайта
+# Должна присутствовать папка /etc/usbhaspkey с дампами ключей
+
+KVER=`uname -r`
+dnf install gcc gcc-c++ make kernel-devel jansson-devel libusb elfutils-libelf-devel git epel-release usbutils
+
+curl -L https://sourceforge.net/projects/usb-vhci/files/linux%20kernel%20module/vhci-hcd-1.15.tar.gz/download > vhci-hcd-1.15.tar.gz
+curl -L https://sourceforge.net/projects/usb-vhci/files/native%20libraries/libusb_vhci-0.8.tar.gz/download > libusb_vhci-0.8.tar.gz
+git clone https://github.com/sam88651/UsbHasp.git
+tar -xpf libusb_vhci-0.8.tar.gz
+tar -xpf vhci-hcd-1.15.tar.gz
+dnf install aksusbd-8.21-1.x86_64.rpm
+
+cd vhci-hcd-1.15
+mkdir -p linux/${KVER}/drivers/usb/core
+cp /usr/src/kernels/${KVER}/include/linux/usb/hcd.h linux/${KVER}/drivers/usb/core
+sed -i 's/\#define DEBUG/\/\/#define DEBUG/' usb-vhci-hcd.c
+sed -i 's/\#define DEBUG/\/\/#define DEBUG/' usb-vhci-iocifc.c
+sed -i 's/VERIFY_READ, //g' usb-vhci-iocifc.c  
+sed -i 's/VERIFY_WRITE, //g' usb-vhci-iocifc.c
+make -s KVERSION=${KVER}
+make install
+echo "usb_vhci_hcd" >> /etc/modules-load.d/usb_vhci.conf
+modprobe usb_vhci_hcd
+echo "usb_vhci_iocifc" >> /etc/modules-load.d/usb_vhci.conf
+modprobe usb_vhci_iocifc
+cd ..
+
+cd libusb_vhci-0.8
+./configure --enable-shared
+make -s
+make -s install
+echo "/usr/local/lib" >> /etc/ld.so.conf.d/libusb_vhci.conf
+ldconfig
+cd ..
+
+cd UsbHasp
+make -s
+cp dist/Release/GNU-Linux/usbhasp /usr/local/sbin
+
+cat <<EOF >> /etc/systemd/system/usbhaspemul.service
+[Unit]
+Description=Emulation HASP key for 1C
+Requires=aksusbd.service
+After=aksusbd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sh -c 'find /etc/usbhaspkey -name "*.json" | xargs /usr/local/sbin/usbhasp'
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload 
+systemctl enable --now usbhaspemul
+
+echo "*************************************************************************"
+lsusb | grep HASP
+echo "*************************************************************************"
+systemctl status aksusbd
+echo "*************************************************************************"
+systemctl status usbhaspemul
