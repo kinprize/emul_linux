@@ -1,0 +1,35 @@
+#!/bin/sh
+
+# Обновление модулей ядра после обновления ядра
+# Должны присутствовать папки:
+# vhci-hcd-1.15
+# libusb_vhci-0.8
+
+KVER=`uname -r`
+
+cd vhci-hcd-1.15
+mkdir -p linux/${KVER}/drivers/usb/core
+cp /usr/src/kernels/${KVER}/include/linux/usb/hcd.h linux/${KVER}/drivers/usb/core
+make -s KVERSION=${KVER}
+make install
+modprobe usb_vhci_hcd
+modprobe usb_vhci_iocifc
+cd ..
+
+cd libusb_vhci-0.8
+./configure --enable-shared
+make -s
+make install
+ldconfig
+
+systemctl restart usbhaspemul
+systemctl restart haspd
+
+echo "*************************************************************************"
+lsusb | grep HASP
+echo "*************************************************************************"
+systemctl status usbhaspemul
+echo "*************************************************************************"
+systemctl status aksusbd
+echo "*************************************************************************"
+systemctl status srv1cv83
